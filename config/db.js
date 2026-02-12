@@ -16,6 +16,8 @@ const connectDB = async () => {
     await mongoose.connect(uri, {
       serverSelectionTimeoutMS: 5000,
       maxPoolSize: 30,
+       retryWrites: false,
+       authSource: "admin",
     });
 
     isConnected = true;
