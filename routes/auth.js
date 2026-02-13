@@ -6,19 +6,48 @@ const router = express.Router();
 const User = require("../models/User");
 const auth = require("../middlewares/authMiddleware");
 
+const escapeRegExp = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
 /* ===============================
    LOGIN
 ================================ */
 router.post("/login", async (req, res) => {
   try {
     const { email, password } = req.body;
+    const identifier = String(email || "").trim();
+    const plainPassword = String(password || "");
 
-    const user = await User.findOne({ email });
+    if (!identifier || !plainPassword) {
+      return res.status(400).json({ message: "Email and password are required" });
+    }
+
+    let user = await User.findOne({
+      $or: [{ email: identifier }, { userCode: identifier }],
+    });
+
+    // Case-insensitive fallback for legacy email casing mismatches
+    if (!user && identifier.includes("@")) {
+      user = await User.findOne({ email: new RegExp(`^${escapeRegExp(identifier)}$`, "i") });
+    }
+
     if (!user) {
       return res.status(401).json({ message: "Invalid credentials" });
     }
 
-    const isMatch = await bcrypt.compare(password, user.password);
+    let isMatch = false;
+    const storedPassword = String(user.password || "");
+
+    if (storedPassword.startsWith("$2a$") || storedPassword.startsWith("$2b$") || storedPassword.startsWith("$2y$")) {
+      isMatch = await bcrypt.compare(plainPassword, storedPassword);
+    } else {
+      // Legacy fallback: migrate plain text password to bcrypt on successful login.
+      isMatch = storedPassword === plainPassword;
+      if (isMatch) {
+        user.password = await bcrypt.hash(plainPassword, 10);
+        await user.save();
+      }
+    }
+
     if (!isMatch) {
       return res.status(401).json({ message: "Invalid credentials" });
     }
@@ -128,4 +157,3 @@ router.post("/change-password", auth, async (req, res) => {
 });
 
 module.exports = router;
-

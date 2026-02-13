@@ -24,8 +24,10 @@ const app = express();
 app.disable("x-powered-by");
 
 const allowedOrigins = new Set([
+  "https://thebigwinclub.netlify.app",
   "https://thebigwinclub.com",
   "https://www.thebigwinclub.com",
+  "https://thebigwinclub.vercel.app",
 ]);
 
 const corsOptions = {
