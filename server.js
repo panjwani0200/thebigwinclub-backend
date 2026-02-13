@@ -30,7 +30,12 @@ app.use(cors({
   allowedHeaders: ["Content-Type", "Authorization"]
 }));
 
-app.options("*", cors());
+app.options(/.*/, cors({
+  origin: ["https://thebigwinclub.com", "https://www.thebigwinclub.com"],
+  credentials: true,
+  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"]
+}));
 
 
 app.use(
@@ -58,7 +63,7 @@ const loginLimiter = rateLimit({
 });
 
 app.use(globalLimiter);
-app.post("/api/auth/login", loginLimiter);
+app.use("/api/auth/login", loginLimiter);
 
 app.get("/health", (req, res) => {
   res.status(200).json({ ok: true, uptime: process.uptime() });
