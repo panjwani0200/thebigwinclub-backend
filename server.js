@@ -89,7 +89,16 @@ app.get("/health", (req, res) => {
   res.status(200).json({ ok: true, uptime: process.uptime() });
 });
 
+app.get("/test-route", (req, res) => {
+  res.status(200).json({ ok: true, message: "Backend routing works" });
+});
+
 app.use("/api/auth", authRoutes);
+// Backward-compatible login endpoint for older frontend builds.
+app.post("/login", loginLimiter, (req, res, next) => {
+  req.url = "/login";
+  return authRoutes(req, res, next);
+});
 app.use("/api/admin", adminRoutes);
 app.use("/api/client", clientRoutes);
 app.use("/api/customer", customerRoutes);
