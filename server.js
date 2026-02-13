@@ -23,27 +23,27 @@ const errorHandler = require("./middlewares/errorHandler");
 const app = express();
 app.disable("x-powered-by");
 
-app.use(cors({
-  origin: ["https://thebigwinclub.com", "https://www.thebigwinclub.com"],
+const allowedOrigins = new Set([
+  "https://thebigwinclub.com",
+  "https://www.thebigwinclub.com",
+]);
+
+const corsOptions = {
+  origin(origin, callback) {
+    // Allow non-browser requests (no Origin header) and approved frontend origins only.
+    if (!origin || allowedOrigins.has(origin)) {
+      return callback(null, true);
+    }
+    return callback(new Error(`CORS origin blocked: ${origin}`));
+  },
   credentials: true,
-  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization"]
-}));
+  methods: ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"],
+};
 
-app.options(/.*/, cors({
-  origin: ["https://thebigwinclub.com", "https://www.thebigwinclub.com"],
-  credentials: true,
-  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization"]
-}));
+app.use(cors(corsOptions));
+app.options(/.*/, cors(corsOptions));
 
-
-app.use(
-  helmet({
-    crossOriginResourcePolicy: false,
-  })
-);
-app.use(compression());
 app.use(express.json({ limit: "1mb" }));
 app.use(express.urlencoded({ extended: true, limit: "1mb" }));
 
@@ -52,6 +52,7 @@ const globalLimiter = rateLimit({
   max: Number(process.env.RATE_LIMIT_MAX || 1000),
   standardHeaders: true,
   legacyHeaders: false,
+  skip: (req) => req.method !== "POST",
 });
 
 const loginLimiter = rateLimit({
@@ -60,8 +61,15 @@ const loginLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   message: { message: "Too many login attempts. Try again later." },
+  skip: (req) => req.method !== "POST",
 });
 
+app.use(
+  helmet({
+    crossOriginResourcePolicy: false,
+  })
+);
+app.use(compression());
 app.use(globalLimiter);
 app.use("/api/auth/login", loginLimiter);
 
