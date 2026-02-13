@@ -24,13 +24,13 @@ const app = express();
 app.disable("x-powered-by");
 
 app.use(cors({
-  origin: true,
+  origin: ["https://thebigwinclub.com", "https://www.thebigwinclub.com"],
   credentials: true,
+  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"]
 }));
-app.options(/.*/, cors({
-  origin: true,
-  credentials: true,
-}));
+
+app.options("*", cors());
 
 
 app.use(
@@ -58,7 +58,7 @@ const loginLimiter = rateLimit({
 });
 
 app.use(globalLimiter);
-app.use("/api/auth/login", loginLimiter);
+app.post("/api/auth/login", loginLimiter);
 
 app.get("/health", (req, res) => {
   res.status(200).json({ ok: true, uptime: process.uptime() });
