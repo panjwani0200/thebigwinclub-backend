@@ -25,21 +25,38 @@ app.disable("x-powered-by");
 
 const allowedOrigins = (process.env.ALLOWED_ORIGINS || "")
   .split(",")
-  .map((o) => o.trim())
+  .map((o) => o.trim().replace(/\/+$/, ""))
   .filter(Boolean);
 
-app.use(
-  cors({
-    origin(origin, callback) {
-      if (!origin) return callback(null, true);
-      if (allowedOrigins.length === 0 || allowedOrigins.includes(origin)) {
-        return callback(null, true);
-      }
-      return callback(new Error("CORS origin blocked"));
-    },
-    credentials: true,
-  })
-);
+const isOriginAllowed = (origin) => {
+  if (!origin) return true;
+  const normalized = String(origin).trim().replace(/\/+$/, "");
+  if (allowedOrigins.length === 0) return true;
+
+  return allowedOrigins.some((entry) => {
+    if (entry === normalized) return true;
+    if (entry.startsWith("*.")) {
+      const root = entry.slice(2);
+      return normalized.endsWith(`.${root}`) || normalized.endsWith(root);
+    }
+    return false;
+  });
+};
+
+const corsOptions = {
+  origin(origin, callback) {
+    if (isOriginAllowed(origin)) {
+      return callback(null, true);
+    }
+    return callback(new Error(`CORS origin blocked: ${origin}`));
+  },
+  credentials: true,
+  methods: ["GET", "HEAD", "PUT", "PATCH", "POST", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"],
+};
+
+app.use(cors(corsOptions));
+app.options(/.*/, cors(corsOptions));
 
 app.use(
   helmet({
