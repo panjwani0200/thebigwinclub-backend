@@ -110,6 +110,25 @@ const PORT = Number(process.env.PORT || 3000);
 
 const startServer = async () => {
   await connectDB();
+   // Auto-seed admin user on startup
+ const bcrypt = require("bcryptjs");
+ const User = require("./models/User");
+ try {
+ const exists = await User.findOne({ email: "admin@bigwinclub.com" });
+ if (!exists) {
+ const hashedPassword = await bcrypt.hash("Admin@123", 12);
+ await User.create({
+ email: "admin@bigwinclub.com",
+ password: hashedPassword,
+ role: "ADMIN",
+ name: "Admin User",
+ isActive: true
+ });
+ console.log("✅ Admin user created automatically");
+ }
+ } catch (err) {
+ console.error("Auto-seed error:", err.message);
+ }
 
   app.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
