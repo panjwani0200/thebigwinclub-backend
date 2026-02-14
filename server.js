@@ -32,8 +32,14 @@ const allowedOrigins = new Set([
 
 const corsOptions = {
   origin(origin, callback) {
-    // Allow non-browser requests (no Origin header) and approved frontend origins only.
+    // Allow non-browser requests and explicit production origins.
     if (!origin || allowedOrigins.has(origin)) {
+      return callback(null, true);
+    }
+
+    // Allow Vercel preview deployments for this project.
+    // Example: https://thebigwinclub-frontend-git-main-xxxxx-projects.vercel.app
+    if (/^https:\/\/.*\.vercel\.app$/i.test(origin)) {
       return callback(null, true);
     }
     return callback(new Error(`CORS origin blocked: ${origin}`));
