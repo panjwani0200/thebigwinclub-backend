@@ -16,7 +16,7 @@ const Wallet = require("../models/wallet");
 const Bet = require("../models/Bet");
 const CustomerGameControl = require("../models/CustomerGameControl");
 
-const MIN_BET_AMOUNT = 50;
+const MIN_BET_AMOUNT = 20;
 
 const optionalUserFromToken = async (req) => {
   try {

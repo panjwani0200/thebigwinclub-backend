@@ -12,7 +12,7 @@ const Game = require("../models/Game");
 const GameRound = require("../models/GameRound");
 const CustomerGameControl = require("../models/CustomerGameControl");
 
-const MIN_BET_AMOUNT = 50;
+const MIN_BET_AMOUNT = 20;
 
 const isCustomerGameEnabled = async (customerId, gameSlug) => {
   const control = await CustomerGameControl.findOne({
@@ -23,7 +23,7 @@ const isCustomerGameEnabled = async (customerId, gameSlug) => {
 };
 
 /* ===============================
-   PLACE BET (CUSTOMER – PAPPU)
+   PLACE BET (CUSTOMER - PAPPU)
 ================================ */
 router.post(
   "/place",
@@ -31,72 +31,76 @@ router.post(
   role([ROLES.CUSTOMER]),
   async (req, res) => {
     try {
-      const { roundId, symbol, amount } = req.body;
+      const { roundId, symbol, symbols, amount } = req.body;
+      const selections = Array.isArray(symbols)
+        ? symbols.map((s) => String(s || "").trim().toLowerCase()).filter(Boolean)
+        : [String(symbol || "").trim().toLowerCase()].filter(Boolean);
 
-      if (!roundId || !symbol || amount === undefined || amount === null) {
+      if (!roundId || amount === undefined || amount === null || selections.length === 0) {
         return res.status(400).json({ message: "Missing fields" });
+      }
+      if (selections.length > 5) {
+        return res.status(400).json({ message: "You can select up to 5 symbols only" });
       }
 
       const betAmount = Number(amount);
       if (!Number.isFinite(betAmount) || betAmount < MIN_BET_AMOUNT) {
-        return res.status(400).json({ message: `Minimum bet is ₹${MIN_BET_AMOUNT}` });
+        return res.status(400).json({ message: `Minimum bet is ?${MIN_BET_AMOUNT}` });
       }
+
       const userId = req.user.id;
       const allowed = await isCustomerGameEnabled(userId, "pappu-playing-pictures");
       if (!allowed) {
         return res.status(403).json({ message: "Game is disabled for this customer" });
       }
 
-      // 1️⃣ Wallet check
       const wallet = await Wallet.findOne({ userId });
       if (!wallet || wallet.balance < betAmount) {
         return res.status(400).json({ message: "Insufficient balance" });
       }
 
-      // 2️⃣ Round check
       const round = await GameRound.findById(roundId);
       if (!round) {
         return res.status(404).json({ message: "Round not found" });
       }
 
-      // 3️⃣ Game ON / OFF check
       const game = await Game.findOne({ slug: "pappu-playing-pictures" });
       if (!game || !game.isActive) {
         return res.status(403).json({ message: "Game is OFF" });
       }
 
-      // 4️⃣ Cut balance
       wallet.balance -= betAmount;
 
       let result = "LOSE";
       let payout = 0;
 
-      // 5️⃣ Win logic (9x)
-      if (round.resultSymbol === symbol) {
+      // Profit 9x + stake return => total payout 10x
+      if (selections.includes(String(round.resultSymbol || "").toLowerCase())) {
         result = "WIN";
-        payout = betAmount * 9;
+        payout = betAmount * 10;
         wallet.balance += payout;
       }
 
       await wallet.save();
 
-      // 6️⃣ Save bet
       const profit = result === "WIN" ? payout - betAmount : -betAmount;
-      const bet = await Bet.create({
+      await Bet.create({
         userId,
         gameSlug: "pappu-playing-pictures",
         roundId,
-        symbol,
+        side: selections.join(","),
         amount: betAmount,
-        odds: 9,
+        odds: 10,
         result,
         payout,
         profit,
       });
 
       res.json({
-        message: result === "WIN" ? "You won 🎉" : "You lost 😢",
+        message: result === "WIN" ? "You won" : "You lost",
         result,
+        selectedSymbols: selections,
+        winningSymbol: round.resultSymbol,
         payout,
         balance: wallet.balance,
       });
@@ -108,7 +112,7 @@ router.post(
 );
 
 /* ===============================
-   CUSTOMER – MY BETS
+   CUSTOMER - MY BETS
 ================================ */
 router.get(
   "/my",
@@ -129,7 +133,7 @@ router.get(
 );
 
 /* ===============================
-   PLACE BET (CUSTOMER – TEEN PATTI A/B)
+   PLACE BET (CUSTOMER - TEEN PATTI A/B)
 ================================ */
 router.post(
   "/teenpatti/place",
@@ -148,7 +152,7 @@ router.post(
         return res.status(400).json({ message: "Invalid side" });
       }
       if (!Number.isFinite(betAmount) || betAmount < MIN_BET_AMOUNT) {
-        return res.status(400).json({ message: `Minimum bet is ₹${MIN_BET_AMOUNT}` });
+        return res.status(400).json({ message: `Minimum bet is ?${MIN_BET_AMOUNT}` });
       }
 
       const userId = req.user.id;
@@ -197,7 +201,7 @@ router.post(
 );
 
 /* ===============================
-   ADMIN / SUPER ADMIN – VIEW ALL BETS
+   ADMIN / SUPER ADMIN - VIEW ALL BETS
 ================================ */
 router.get(
   "/all",
@@ -242,7 +246,7 @@ router.get(
       let totalBet = 0;
       let totalWin = 0;
 
-      bets.forEach(b => {
+      bets.forEach((b) => {
         totalBet += b.amount || 0;
         if (b.result === "WIN") totalWin += b.payout || 0;
       });

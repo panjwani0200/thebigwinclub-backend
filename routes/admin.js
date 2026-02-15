@@ -499,6 +499,8 @@ router.post(
 
       market.result = result;
       market.status = "closed";
+      market.openSessionStatus = "closed";
+      market.closeSessionStatus = "closed";
       if (!market.roundId) {
         market.roundId = `MK${Date.now()}${Math.floor(Math.random() * 1000)}`;
       }
@@ -569,6 +571,8 @@ router.post(
       if (!market) return res.status(404).json({ message: "Market not found" });
 
       market.status = "running";
+      market.openSessionStatus = "running";
+      market.closeSessionStatus = "running";
       market.result = "";
       market.roundId = `MK${Date.now()}${Math.floor(Math.random() * 1000)}`;
       await market.save();
@@ -594,12 +598,56 @@ router.post(
       if (!market) return res.status(404).json({ message: "Market not found" });
 
       market.status = "closed";
+      market.openSessionStatus = "closed";
+      market.closeSessionStatus = "closed";
       await market.save();
 
       res.json({ message: "Market closed", market });
     } catch (err) {
       console.error("ADMIN MATKA CLOSE ERROR:", err);
       res.status(500).json({ message: "Failed to close market" });
+    }
+  }
+);
+
+/* ===============================
+   ADMIN -> MATKA SESSION CONTROL
+================================ */
+router.post(
+  "/matka/markets/:marketId/session/:sessionType/:action",
+  auth,
+  role([ROLES.ADMIN, ROLES.SUPER_ADMIN]),
+  async (req, res) => {
+    try {
+      const market = await MatkaMarket.findOne({ marketId: req.params.marketId });
+      if (!market) return res.status(404).json({ message: "Market not found" });
+
+      const sessionType = String(req.params.sessionType || "").toLowerCase();
+      const action = String(req.params.action || "").toLowerCase();
+      if (!["open", "close"].includes(sessionType)) {
+        return res.status(400).json({ message: "Invalid session type" });
+      }
+      if (!["open", "close"].includes(action)) {
+        return res.status(400).json({ message: "Invalid action" });
+      }
+
+      const statusField = sessionType === "open" ? "openSessionStatus" : "closeSessionStatus";
+      market[statusField] = action === "open" ? "running" : "closed";
+
+      if (market.openSessionStatus === "closed" && market.closeSessionStatus === "closed") {
+        market.status = "closed";
+      } else if (market.status === "closed") {
+        market.status = "running";
+      }
+
+      await market.save();
+      res.json({
+        message: `${sessionType.toUpperCase()} session ${action === "open" ? "opened" : "closed"}`,
+        market,
+      });
+    } catch (err) {
+      console.error("ADMIN MATKA SESSION CONTROL ERROR:", err);
+      res.status(500).json({ message: "Failed to update session status" });
     }
   }
 );

@@ -9,7 +9,7 @@ const MatkaMarket = require("../models/MatkaMarket");
 const MatkaBet = require("../models/MatkaBet");
 const Wallet = require("../models/wallet");
 
-const MIN_BET_AMOUNT = 50;
+const MIN_BET_AMOUNT = 20;
 
 const MARKETS = [
   { marketId: "tara_mumbai_day", name: "Tara Mumbai Day", openTime: "10:00 AM", closeTime: "02:30 PM" },
@@ -25,6 +25,8 @@ const ensureMarkets = async () => {
     MARKETS.map((m) => ({
       ...m,
       status: "running",
+      openSessionStatus: "running",
+      closeSessionStatus: "running",
       result: "",
       roundId: `MK${Date.now()}${Math.floor(Math.random() * 1000)}`,
     }))
@@ -119,10 +121,34 @@ router.post(
   role([ROLES.CUSTOMER]),
   async (req, res) => {
     try {
-      const { marketId, betType, number, session, amount } = req.body;
-      const amt = Number(amount);
-      if (!marketId || !betType || !number || !session || !Number.isFinite(amt) || amt < MIN_BET_AMOUNT) {
+      const {
+        marketId: singleMarketId,
+        betType: singleBetType,
+        number: singleNumber,
+        session: singleSession,
+        amount: singleAmount,
+        bets,
+      } = req.body;
+
+      const normalizedBets = Array.isArray(bets) && bets.length > 0
+        ? bets
+        : [{
+            marketId: singleMarketId,
+            betType: singleBetType,
+            number: singleNumber,
+            session: singleSession,
+            amount: singleAmount,
+          }];
+
+      if (!normalizedBets.length) {
         return res.status(400).json({ message: "Invalid bet data" });
+      }
+
+      const marketId = String(
+        normalizedBets[0]?.marketId || singleMarketId || ""
+      ).trim();
+      if (!marketId) {
+        return res.status(400).json({ message: "Market is required" });
       }
 
       const market = await MatkaMarket.findOne({ marketId });
@@ -131,36 +157,76 @@ router.post(
         return res.status(400).json({ message: "Betting closed for this market" });
       }
 
-      if (!validateBetNumber(betType, number)) {
-        return res.status(400).json({ message: "Invalid number for bet type" });
+      // Backfill for old documents that do not have session status fields.
+      if (!market.openSessionStatus) market.openSessionStatus = "running";
+      if (!market.closeSessionStatus) market.closeSessionStatus = "running";
+
+      const sanitizedBets = [];
+      let totalAmount = 0;
+
+      for (const rawBet of normalizedBets) {
+        const betType = String(rawBet?.betType || "").trim().toUpperCase();
+        const number = String(rawBet?.number || "").trim();
+        const session = String(rawBet?.session || "").trim().toUpperCase();
+        const amount = Number(rawBet?.amount);
+
+        if (!betType || !number || !session || !Number.isFinite(amount) || amount < MIN_BET_AMOUNT) {
+          return res.status(400).json({ message: "Invalid bet data" });
+        }
+
+        if (session !== "OPEN" && session !== "CLOSE") {
+          return res.status(400).json({ message: "Invalid session" });
+        }
+
+        if (session === "OPEN" && market.openSessionStatus === "closed") {
+          return res.status(400).json({ message: "Open session is closed for this market" });
+        }
+        if (session === "CLOSE" && market.closeSessionStatus === "closed") {
+          return res.status(400).json({ message: "Close session is closed for this market" });
+        }
+
+        if (!validateBetNumber(betType, number)) {
+          return res.status(400).json({ message: "Invalid number for bet type" });
+        }
+
+        sanitizedBets.push({
+          userId: req.user.id,
+          marketId,
+          roundId: market.roundId,
+          betType,
+          number,
+          session,
+          amount,
+          status: "PENDING",
+          payout: 0,
+        });
+        totalAmount += amount;
       }
 
       const wallet = await Wallet.findOne({ userId: req.user.id });
-      if (!wallet || wallet.balance < amt) {
+      if (!wallet || wallet.balance < totalAmount) {
         return res.status(400).json({ message: "Insufficient balance" });
       }
 
       if (!market.roundId) {
         market.roundId = `MK${Date.now()}${Math.floor(Math.random() * 1000)}`;
         await market.save();
+        sanitizedBets.forEach((b) => {
+          b.roundId = market.roundId;
+        });
       }
 
-      wallet.balance -= amt;
+      wallet.balance -= totalAmount;
       await wallet.save();
 
-      const bet = await MatkaBet.create({
-        userId: req.user.id,
-        marketId,
-        roundId: market.roundId,
-        betType,
-        number: String(number).trim(),
-        session: session.toUpperCase(),
-        amount: amt,
-        status: "PENDING",
-        payout: 0,
-      });
+      const created = await MatkaBet.insertMany(sanitizedBets);
 
-      res.json({ message: "Bet placed", betId: bet._id });
+      res.json({
+        message: "Bet placed",
+        count: created.length,
+        totalAmount,
+        betIds: created.map((b) => b._id),
+      });
     } catch (err) {
       console.error("MATKA BET ERROR:", err);
       res.status(500).json({ message: "Bet failed" });
