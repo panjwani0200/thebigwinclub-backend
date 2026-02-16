@@ -13,6 +13,20 @@ const GameRound = require("../models/GameRound");
 const CustomerGameControl = require("../models/CustomerGameControl");
 
 const MIN_BET_AMOUNT = 20;
+const PAPPU_SYMBOLS = [
+  "cow",
+  "football",
+  "diya",
+  "rose",
+  "butterfly",
+  "rabbit",
+  "umbrella",
+  "kabutar",
+  "bucket",
+  "joker",
+  "star",
+  "coin",
+];
 
 const isCustomerGameEnabled = async (customerId, gameSlug) => {
   const control = await CustomerGameControl.findOne({
@@ -45,7 +59,7 @@ router.post(
 
       const betAmount = Number(amount);
       if (!Number.isFinite(betAmount) || betAmount < MIN_BET_AMOUNT) {
-        return res.status(400).json({ message: `Minimum bet is ?${MIN_BET_AMOUNT}` });
+        return res.status(400).json({ message: `Minimum bet is ₹${MIN_BET_AMOUNT}` });
       }
 
       const userId = req.user.id;
@@ -71,15 +85,42 @@ router.post(
 
       wallet.balance -= betAmount;
 
+      // Fresh random result on every placed bet.
+      // Admin forceResult and RTP still apply.
+      const forceResult = String(game.forceResult || "").toUpperCase();
+      let isWin = false;
+      if (forceResult === "WIN") {
+        isWin = true;
+      } else if (forceResult === "LOSE") {
+        isWin = false;
+      } else {
+        const rtp = Number.isFinite(Number(game.rtp)) ? Number(game.rtp) : 90;
+        isWin = Math.random() * 100 < rtp;
+      }
+
+      const lowerSelections = selections.map((s) => s.toLowerCase());
+      let winningSymbol = null;
+      if (isWin) {
+        winningSymbol =
+          lowerSelections[Math.floor(Math.random() * lowerSelections.length)] || "cow";
+      } else {
+        const losingPool = PAPPU_SYMBOLS.filter((s) => !lowerSelections.includes(s));
+        const source = losingPool.length ? losingPool : PAPPU_SYMBOLS;
+        winningSymbol = source[Math.floor(Math.random() * source.length)];
+      }
+
       let result = "LOSE";
       let payout = 0;
 
       // Profit 9x + stake return => total payout 10x
-      if (selections.includes(String(round.resultSymbol || "").toLowerCase())) {
+      if (lowerSelections.includes(String(winningSymbol || "").toLowerCase())) {
         result = "WIN";
         payout = betAmount * 10;
         wallet.balance += payout;
       }
+
+      round.resultSymbol = winningSymbol;
+      await round.save();
 
       await wallet.save();
 
@@ -100,7 +141,7 @@ router.post(
         message: result === "WIN" ? "You won" : "You lost",
         result,
         selectedSymbols: selections,
-        winningSymbol: round.resultSymbol,
+        winningSymbol,
         payout,
         balance: wallet.balance,
       });
