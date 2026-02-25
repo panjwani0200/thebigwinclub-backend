@@ -12,6 +12,7 @@ const Bet = require("../models/Bet");
 const Transaction = require("../models/Transaction");
 const WithdrawLog = require("../models/WithdrawLog");
 const DepositLog = require("../models/DepositLog");
+const MatkaBet = require("../models/MatkaBet");
 
 /* =================================
    CUSTOMER GAME AREA (UNCHANGED)
@@ -359,6 +360,58 @@ router.get(
     } catch (err) {
       console.error("CUSTOMER BETS ERROR:", err);
       res.status(500).json({ message: "Failed to fetch customer bets" });
+    }
+  }
+);
+
+/* =================================
+   CLIENT -> CUSTOMER MATKA BETS (BY CODE)
+================================= */
+router.get(
+  "/matka-bets/:customerCode",
+  auth,
+  role([ROLES.CLIENT, ROLES.SUPER_ADMIN]),
+  async (req, res) => {
+    try {
+      const { customerCode } = req.params;
+
+      const customer = await User.findOne({
+        userCode: customerCode,
+        role: "CUSTOMER",
+        createdByClient: req.user.id,
+      }).select("_id userCode name email");
+
+      if (!customer) {
+        return res.status(404).json({ message: "Customer not found" });
+      }
+
+      const bets = await MatkaBet.find({ userId: customer._id })
+        .sort({ createdAt: -1 })
+        .limit(500);
+
+      const normalized = bets.map((b) => {
+        const amount = Number(b.amount || 0);
+        const payout = Number(b.payout || 0);
+        const status = String(b.status || "PENDING").toUpperCase();
+        const profit = status === "WIN" ? payout - amount : status === "LOSE" ? -amount : 0;
+        return {
+          ...b.toObject(),
+          profit,
+        };
+      });
+
+      res.json({
+        customer: {
+          _id: customer._id,
+          userCode: customer.userCode,
+          name: customer.name,
+          email: customer.email,
+        },
+        bets: normalized,
+      });
+    } catch (err) {
+      console.error("CUSTOMER MATKA BETS ERROR:", err);
+      res.status(500).json({ message: "Failed to fetch matka bets" });
     }
   }
 );

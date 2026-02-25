@@ -561,6 +561,55 @@ router.post(
 /* ===============================
    ADMIN → MATKA OPEN NEW ROUND
 ================================ */
+/* ===============================
+   ADMIN -> MATKA BETS
+================================ */
+router.get(
+  "/matka/bets",
+  auth,
+  role([ROLES.ADMIN, ROLES.SUPER_ADMIN]),
+  async (req, res) => {
+    try {
+      const customerCode = String(req.query.customerCode || "").trim();
+      const customerId = String(req.query.customerId || "").trim();
+      const limit = Math.min(Math.max(Number(req.query.limit) || 200, 1), 1000);
+
+      let filter = {};
+      if (customerCode) {
+        const customer = await User.findOne({ userCode: customerCode, role: "CUSTOMER" }).select("_id");
+        if (!customer) return res.status(404).json({ message: "Customer not found" });
+        filter.userId = customer._id;
+      } else if (customerId) {
+        filter.userId = customerId;
+      }
+
+      const bets = await MatkaBet.find(filter)
+        .sort({ createdAt: -1 })
+        .limit(limit)
+        .populate("userId", "name email userCode createdByClient");
+
+      const normalized = bets.map((b) => {
+        const amount = Number(b.amount || 0);
+        const payout = Number(b.payout || 0);
+        const status = String(b.status || "PENDING").toUpperCase();
+        const profit = status === "WIN" ? payout - amount : status === "LOSE" ? -amount : 0;
+        return {
+          ...b.toObject(),
+          profit,
+        };
+      });
+
+      res.json(normalized);
+    } catch (err) {
+      console.error("ADMIN MATKA BETS ERROR:", err);
+      res.status(500).json({ message: "Failed to fetch matka bets" });
+    }
+  }
+);
+
+/* ===============================
+   ADMIN -> MATKA OPEN NEW ROUND
+================================ */
 router.post(
   "/matka/markets/:marketId/open",
   auth,
@@ -648,6 +697,35 @@ router.post(
     } catch (err) {
       console.error("ADMIN MATKA SESSION CONTROL ERROR:", err);
       res.status(500).json({ message: "Failed to update session status" });
+    }
+  }
+);
+
+/* ===============================
+   ADMIN -> MATKA TIMING UPDATE
+================================ */
+router.patch(
+  "/matka/markets/:marketId/timing",
+  auth,
+  role([ROLES.ADMIN, ROLES.SUPER_ADMIN]),
+  async (req, res) => {
+    try {
+      const { openTime, closeTime } = req.body;
+      if (!openTime || !closeTime) {
+        return res.status(400).json({ message: "openTime and closeTime are required" });
+      }
+
+      const market = await MatkaMarket.findOne({ marketId: req.params.marketId });
+      if (!market) return res.status(404).json({ message: "Market not found" });
+
+      market.openTime = String(openTime).trim();
+      market.closeTime = String(closeTime).trim();
+      await market.save();
+
+      res.json({ message: "Market timing updated", market });
+    } catch (err) {
+      console.error("ADMIN MATKA TIMING UPDATE ERROR:", err);
+      res.status(500).json({ message: "Failed to update market timing" });
     }
   }
 );

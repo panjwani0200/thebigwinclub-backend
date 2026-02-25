@@ -45,22 +45,41 @@ router.post(
   role([ROLES.CUSTOMER]),
   async (req, res) => {
     try {
-      const { roundId, symbol, symbols, amount } = req.body;
-      const selections = Array.isArray(symbols)
-        ? symbols.map((s) => String(s || "").trim().toLowerCase()).filter(Boolean)
-        : [String(symbol || "").trim().toLowerCase()].filter(Boolean);
+      const { roundId, symbol, symbols, betMap, amount } = req.body;
+      let normalizedBetMap = {};
 
-      if (!roundId || amount === undefined || amount === null || selections.length === 0) {
+      if (betMap && typeof betMap === "object" && !Array.isArray(betMap)) {
+        for (const [key, value] of Object.entries(betMap)) {
+          const k = String(key || "").trim().toLowerCase();
+          const count = Number(value);
+          if (!k || !PAPPU_SYMBOLS.includes(k)) continue;
+          if (!Number.isFinite(count) || count <= 0) continue;
+          normalizedBetMap[k] = Math.floor(count);
+        }
+      } else {
+        const selectionList = Array.isArray(symbols)
+          ? symbols.map((s) => String(s || "").trim().toLowerCase()).filter(Boolean)
+          : [String(symbol || "").trim().toLowerCase()].filter(Boolean);
+
+        normalizedBetMap = selectionList.reduce((acc, key) => {
+          if (!PAPPU_SYMBOLS.includes(key)) return acc;
+          acc[key] = (acc[key] || 0) + 1;
+          return acc;
+        }, {});
+      }
+
+      const selectedKeys = Object.keys(normalizedBetMap);
+      const totalUnits = selectedKeys.reduce((sum, key) => sum + Number(normalizedBetMap[key] || 0), 0);
+
+      if (!roundId || amount === undefined || amount === null || selectedKeys.length === 0 || totalUnits <= 0) {
         return res.status(400).json({ message: "Missing fields" });
       }
-      if (selections.length > 5) {
-        return res.status(400).json({ message: "You can select up to 5 symbols only" });
-      }
 
-      const betAmount = Number(amount);
-      if (!Number.isFinite(betAmount) || betAmount < MIN_BET_AMOUNT) {
+      const unitAmount = Number(amount);
+      if (!Number.isFinite(unitAmount) || unitAmount < MIN_BET_AMOUNT) {
         return res.status(400).json({ message: `Minimum bet is ₹${MIN_BET_AMOUNT}` });
       }
+      const totalStake = unitAmount * totalUnits;
 
       const userId = req.user.id;
       const allowed = await isCustomerGameEnabled(userId, "pappu-playing-pictures");
@@ -69,7 +88,7 @@ router.post(
       }
 
       const wallet = await Wallet.findOne({ userId });
-      if (!wallet || wallet.balance < betAmount) {
+      if (!wallet || wallet.balance < totalStake) {
         return res.status(400).json({ message: "Insufficient balance" });
       }
 
@@ -83,7 +102,7 @@ router.post(
         return res.status(403).json({ message: "Game is OFF" });
       }
 
-      wallet.balance -= betAmount;
+      wallet.balance -= totalStake;
 
       // Fresh random result on every placed bet.
       // Admin forceResult and RTP still apply.
@@ -98,7 +117,7 @@ router.post(
         isWin = Math.random() * 100 < rtp;
       }
 
-      const lowerSelections = selections.map((s) => s.toLowerCase());
+      const lowerSelections = selectedKeys.map((s) => s.toLowerCase());
       let winningSymbol = null;
       if (isWin) {
         winningSymbol =
@@ -115,7 +134,8 @@ router.post(
       // Profit 9x + stake return => total payout 10x
       if (lowerSelections.includes(String(winningSymbol || "").toLowerCase())) {
         result = "WIN";
-        payout = betAmount * 10;
+        const winningUnits = Number(normalizedBetMap[String(winningSymbol || "").toLowerCase()] || 0);
+        payout = unitAmount * winningUnits * 10;
         wallet.balance += payout;
       }
 
@@ -124,13 +144,13 @@ router.post(
 
       await wallet.save();
 
-      const profit = result === "WIN" ? payout - betAmount : -betAmount;
+      const profit = result === "WIN" ? payout - totalStake : -totalStake;
       await Bet.create({
         userId,
         gameSlug: "pappu-playing-pictures",
         roundId,
-        side: selections.join(","),
-        amount: betAmount,
+        side: selectedKeys.map((k) => `${k}:${normalizedBetMap[k]}`).join(","),
+        amount: totalStake,
         odds: 10,
         result,
         payout,
@@ -140,8 +160,12 @@ router.post(
       res.json({
         message: result === "WIN" ? "You won" : "You lost",
         result,
-        selectedSymbols: selections,
+        selectedSymbols: selectedKeys,
+        betMap: normalizedBetMap,
+        totalUnits,
         winningSymbol,
+        unitAmount,
+        totalBet: totalStake,
         payout,
         balance: wallet.balance,
       });
@@ -193,7 +217,7 @@ router.post(
         return res.status(400).json({ message: "Invalid side" });
       }
       if (!Number.isFinite(betAmount) || betAmount < MIN_BET_AMOUNT) {
-        return res.status(400).json({ message: `Minimum bet is ?${MIN_BET_AMOUNT}` });
+        return res.status(400).json({ message: `Minimum bet is ₹${MIN_BET_AMOUNT}` });
       }
 
       const userId = req.user.id;
