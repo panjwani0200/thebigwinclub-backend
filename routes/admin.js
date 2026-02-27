@@ -489,15 +489,99 @@ router.post(
         return res.status(400).json({ message: "Market and result required" });
       }
 
-      const format = /^\d{3}-\d{2}-\d{3}$/;
-      if (!format.test(result)) {
-        return res.status(400).json({ message: "Invalid result format" });
+      const parsedResult = (() => {
+        const value = String(result).trim();
+
+        // 1) XXX-YY-XXX (full format)
+        let m = value.match(/^(\d{3})-(\d{2})-(\d{3})$/);
+        if (m) {
+          const openPatti = m[1];
+          const jodi = m[2];
+          const closePatti = m[3];
+          return {
+            openPatti,
+            closePatti,
+            openAnk: jodi[0],
+            closeAnk: jodi[1],
+            jodi,
+          };
+        }
+
+        // 2) XXX-YY
+        m = value.match(/^(\d{3})-(\d{2})$/);
+        if (m) {
+          const openPatti = m[1];
+          const jodi = m[2];
+          return {
+            openPatti,
+            closePatti: null,
+            openAnk: jodi[0],
+            closeAnk: jodi[1],
+            jodi,
+          };
+        }
+
+        // 3) XXX-Y
+        m = value.match(/^(\d{3})-(\d)$/);
+        if (m) {
+          const openPatti = m[1];
+          const closeAnk = m[2];
+          const openAnk = String(
+            openPatti.split("").reduce((sum, d) => sum + Number(d), 0) % 10
+          );
+          return {
+            openPatti,
+            closePatti: null,
+            openAnk,
+            closeAnk,
+            jodi: `${openAnk}${closeAnk}`,
+          };
+        }
+
+        // 4) YY-XXX
+        m = value.match(/^(\d{2})-(\d{3})$/);
+        if (m) {
+          const jodi = m[1];
+          const closePatti = m[2];
+          return {
+            openPatti: null,
+            closePatti,
+            openAnk: jodi[0],
+            closeAnk: jodi[1],
+            jodi,
+          };
+        }
+
+        // 5) Y-XXX
+        m = value.match(/^(\d)-(\d{3})$/);
+        if (m) {
+          const openAnk = m[1];
+          const closePatti = m[2];
+          const closeAnk = String(
+            closePatti.split("").reduce((sum, d) => sum + Number(d), 0) % 10
+          );
+          return {
+            openPatti: null,
+            closePatti,
+            openAnk,
+            closeAnk,
+            jodi: `${openAnk}${closeAnk}`,
+          };
+        }
+
+        return null;
+      })();
+
+      if (!parsedResult) {
+        return res.status(400).json({
+          message: "Invalid result format. Use XXX-YY-XXX, XXX-YY, XXX-Y, YY-XXX, or Y-XXX",
+        });
       }
 
       const market = await MatkaMarket.findOne({ marketId });
       if (!market) return res.status(404).json({ message: "Market not found" });
 
-      market.result = result;
+      market.result = String(result).trim();
       market.status = "closed";
       market.openSessionStatus = "closed";
       market.closeSessionStatus = "closed";
@@ -506,13 +590,7 @@ router.post(
       }
       await market.save();
 
-      const [openPatti, , closePatti] = result.split("-");
-      const openAnk = String(
-        openPatti.split("").reduce((sum, d) => sum + Number(d), 0) % 10
-      );
-      const closeAnk = String(
-        closePatti.split("").reduce((sum, d) => sum + Number(d), 0) % 10
-      );
+      const { openPatti, closePatti, openAnk, closeAnk, jodi } = parsedResult;
 
       const pending = await MatkaBet.find({
         marketId,
@@ -526,12 +604,11 @@ router.post(
             (bet.session === "OPEN" && bet.number === openAnk) ||
             (bet.session === "CLOSE" && bet.number === closeAnk);
         } else if (bet.betType === "JODI") {
-          const jodi = `${openAnk}${closeAnk}`;
           isWin = bet.number === jodi;
         } else {
           isWin =
-            (bet.session === "OPEN" && bet.number === openPatti) ||
-            (bet.session === "CLOSE" && bet.number === closePatti);
+            (bet.session === "OPEN" && !!openPatti && bet.number === openPatti) ||
+            (bet.session === "CLOSE" && !!closePatti && bet.number === closePatti);
         }
 
         if (isWin) {
